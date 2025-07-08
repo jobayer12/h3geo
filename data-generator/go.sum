@@ -1,0 +1,4 @@
+github.com/brianvoe/gofakeit/v6 v6.28.0 h1:Xib46XXuQfmlLS2EXRuJpqcw8St6qSZz75OUo0tgAW4=
+github.com/brianvoe/gofakeit/v6 v6.28.0/go.mod h1:Xj58BMSnFqcn/fAQeSK+/PLtC5kSb7FJIq4JyGa8vEs=
+github.com/uber/h3-go/v4 v4.3.0 h1:5y5je8gu6+1pGzGo8soiudmgE3WJzfJRWdy0yhc3+HY=
+github.com/uber/h3-go/v4 v4.3.0/go.mod h1:EyZ/EWguHlheIBcshTAMmQPYcaGKVvJ4qlzEHzC0BkU=

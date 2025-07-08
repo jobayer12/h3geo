@@ -1,0 +1,6 @@
+node_modules/
+.angular/
+dist/
+.vscode/
+package-lock.json
+data-generator/users_data.csv
