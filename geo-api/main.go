@@ -43,7 +43,11 @@ var collection *mongo.Collection
 func main() {
 	// Connect to MongoDB
 	var err error
-	client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(""))
+	mongoURI := os.Getenv("DATABASE_CONNECTION_URI")
+	if mongoURI == "" {
+		log.Fatal("DATABASE_CONNECTION_URI environment variable not set")
+	}
+	client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		fmt.Println("Error connecting to MongoDB:", err)
 		log.Fatal(err)
