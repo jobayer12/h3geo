@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  geo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_CONNECTION_URI=mongodb://mongo:27017
+    depends_on:
+      - mongo
+    networks:
+      - geo-network
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=h3geo
+    volumes:
+      - mongo_data:/data/db
+      - ./data-generator/users_data.csv:/docker-entrypoint-initdb.d/users_data.csv:ro
+    networks:
+      - geo-network
+    restart: unless-stopped
+
+  # Optional: Data generator service to populate MongoDB
+  data-generator:
+    build:
+      context: ./data-generator
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_CONNECTION_URI=mongodb://mongo:27017
+    depends_on:
+      - mongo
+    networks:
+      - geo-network
+    profiles:
+      - init-data
+
+volumes:
+  mongo_data:
+
+networks:
+  geo-network:
+    driver: bridge
