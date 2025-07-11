@@ -2,6 +2,7 @@ import { Component, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
 import * as L from 'leaflet';
+import { environment } from '../environments/environment';
 
 interface User {
   id: string;
@@ -105,18 +106,21 @@ export class AppComponent implements AfterViewInit {
     this.users = [];
     this.clearUserMarkers();
 
-    this.http.post<NearbyResponse>('http://localhost:8080/api/nearby', { lat, long: lng })
-      .subscribe({
-        next: (response) => {
-          this.users = response.users;
-          this.addUserMarkers(response.users);
-          this.loading = false;
-        },
-        error: (error) => {
-          console.error('Error fetching nearby users:', error);
-          this.loading = false;
-        }
-      });
+    this.http.post<NearbyResponse>(
+      `${environment.apiBaseUrl}/api/nearby`, 
+      { lat, long: lng }
+    )
+    .subscribe({
+      next: (response) => {
+        this.users = response.users;
+        this.addUserMarkers(response.users);
+        this.loading = false;
+      },
+      error: (error) => {
+        console.error('Error fetching nearby users:', error);
+        this.loading = false;
+      }
+    });
   }
 
   private addUserMarkers(users: User[]): void {
