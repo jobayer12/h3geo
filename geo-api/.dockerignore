@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Node modules (will be installed in container)
+geo-map-app/node_modules
+
+# Build artifacts
+geo-map-app/dist
+geo-api/geo-api
+
+# IDE files
+.vscode
+.idea
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+.env.production 

@@ -1,90 +1,183 @@
 package main
 
 import (
-	"encoding/csv"
+	"context"
 	"fmt"
+	"math/rand"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/brianvoe/gofakeit/v6"
 	"github.com/uber/h3-go/v4"
-	"math/rand"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/joho/godotenv"
 	"os"
-	"strconv"
-	"time"
 )
 
 type User struct {
-	ID    string
-	Name  string
-	Email string
-	Lat   float64
-	Long  float64
-	H3ID  string
+	Name  string  `bson:"name"`
+	Email string  `bson:"email"`
+	Lat   float64 `bson:"lat"`
+	Long  float64 `bson:"long"`
+	H3ID  string  `bson:"h3_id"`
 }
 
-func main() {
-	// Seed random number generator
-	rand.Seed(time.Now().UnixNano())
-	gofakeit.Seed(time.Now().UnixNano())
+var (
+	preGeneratedNames  []string
+	preGeneratedEmails []string
+	mongoClient        *mongo.Client
+	mongoCollection    *mongo.Collection
+	insertedCount      int64
+)
 
-	// Bangladesh boundaries (approximate)
-	minLat := 20.670883
-	maxLat := 26.446526
-	minLng := 88.028336
-	maxLng := 92.672668
+func init() {
+	// Pre-generate 10k fake names and emails
+	preGeneratedNames = make([]string, 10000)
+	preGeneratedEmails = make([]string, 10000)
+	for i := 0; i < 10000; i++ {
+		preGeneratedNames[i] = gofakeit.Name()
+		preGeneratedEmails[i] = gofakeit.Email()
+	}
+}
 
-	// Create CSV file
-	file, err := os.Create("users_data.csv")
+func initMongoDB() {
+	var err error
+	_ = godotenv.Load("../.env")
+	mongoURI := os.Getenv("DATABASE_CONNECTION_URI")
+	fmt.Println("mongoURI", mongoURI)
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017"
+	}
+	dbName := os.Getenv("MONGO_INITDB_DATABASE")
+	if dbName == "" {
+		dbName = "geo_data"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	mongoClient, err = mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		panic(err)
 	}
-	defer file.Close()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
+	mongoCollection = mongoClient.Database(dbName).Collection("users")
+}
 
-	// Write header
-	header := []string{"name", "email", "lat", "long", "h3_id"}
-	writer.Write(header)
+func main() {
+	// Load .env if present
+	_ = godotenv.Load()
+	mongoURI := os.Getenv("DATABASE_CONNECTION_URI")
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017"
+	}
+	dbName := os.Getenv("MONGO_INITDB_DATABASE")
+	if dbName == "" {
+		dbName = "geo_data"
+	}
+	// Global coordinates
+	minLat := -90.0
+	maxLat := 90.0
+	minLng := -180.0
+	maxLng := 180.0
 
-	// Generate 2 million records
-	fmt.Println("Generating 2 million user records...")
-	for i := 0; i < 2000000; i++ {
-		// Generate random coordinates within Bangladesh
-		lat := minLat + rand.Float64()*(maxLat-minLat)
-		lng := minLng + rand.Float64()*(maxLng-minLng)
+	initMongoDB()
 
-		// Generate H3 ID at resolution 7
-		h3ID, err := h3.LatLngToCell(h3.LatLng{
-			Lat: lat,
-			Lng: lng,
-		}, 8)
+	// Configuration
+	totalRecords := 200_000_000 // 200 million
+	numWorkers := runtime.NumCPU() * 4
+	batchSize := 10_000
+	recordsPerWorker := totalRecords / numWorkers
+
+	fmt.Printf("Starting to insert %d records using %d workers...\n", totalRecords, numWorkers)
+	start := time.Now()
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go mongoWorker(i, recordsPerWorker, batchSize, minLat, maxLat, minLng, maxLng, &wg)
+	}
+
+	wg.Wait()
+
+	duration := time.Since(start)
+	fmt.Printf("✅ Completed inserting %d records in %v\n", totalRecords, duration)
+	fmt.Printf("⚡ Insert rate: %.0f records/second\n", float64(totalRecords)/duration.Seconds())
+
+	// Create index on h3_id after all data is inserted
+	createH3IDIndex()
+}
+
+func mongoWorker(id, recordCount, batchSize int, minLat, maxLat, minLng, maxLng float64, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	localRand := rand.New(rand.NewSource(time.Now().UnixNano() + int64(id)))
+	var batch []interface{}
+	ctx := context.Background()
+
+	for i := 0; i < recordCount; i++ {
+		lat := minLat + localRand.Float64()*(maxLat-minLat)
+		lng := minLng + localRand.Float64()*(maxLng-minLng)
+
+		h3ID, err := h3.LatLngToCell(h3.LatLng{Lat: lat, Lng: lng}, 8)
 		if err != nil {
-			fmt.Printf("Error generating H3 ID for lat: %f, lng: %f: %v\n", lat, lng, err)
 			continue
 		}
 
 		user := User{
-			Name:  gofakeit.Name(),
-			Email: gofakeit.Email(),
+			Name:  preGeneratedNames[localRand.Intn(len(preGeneratedNames))],
+			Email: preGeneratedEmails[localRand.Intn(len(preGeneratedEmails))],
 			Lat:   lat,
 			Long:  lng,
 			H3ID:  h3ID.String(),
 		}
+		batch = append(batch, user)
 
-		// Write to CSV
-		record := []string{
-			user.Name,
-			user.Email,
-			strconv.FormatFloat(user.Lat, 'f', 6, 64),
-			strconv.FormatFloat(user.Long, 'f', 6, 64),
-			user.H3ID,
-		}
-		writer.Write(record)
-
-		// Progress indicator
-		if i%100000 == 0 {
-			fmt.Printf("Generated %d records\n", i)
+		if len(batch) >= batchSize {
+			insertBatch(batch, ctx, id)
+			batch = batch[:0]
 		}
 	}
 
-	fmt.Println("Data generation completed! File saved as users_data.csv")
+	if len(batch) > 0 {
+		insertBatch(batch, ctx, id)
+	}
+}
+
+func insertBatch(batch []interface{}, ctx context.Context, id int) {
+	insertCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	_, err := mongoCollection.InsertMany(insertCtx, batch)
+	if err != nil {
+		fmt.Printf("❌ Worker %d: Insert error: %v\n", id, err)
+		return
+	}
+
+	currentTotal := atomic.AddInt64(&insertedCount, int64(len(batch)))
+	if currentTotal%1_000_000 == 0 {
+		percent := float64(currentTotal) / 200_000_000 * 100
+		fmt.Printf("📦 Inserted %d records (%.2f%% complete)\n", currentTotal, percent)
+	}
+}
+
+func createH3IDIndex() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	indexModel := mongo.IndexModel{
+		Keys:    map[string]interface{}{"h3_id": 1},
+		Options: nil,
+	}
+
+	fmt.Println("⏳ Creating index on h3_id...")
+	_, err := mongoCollection.Indexes().CreateOne(ctx, indexModel)
+	if err != nil {
+		fmt.Printf("❌ Failed to create index on h3_id: %v\n", err)
+		return
+	}
+	fmt.Println("✅ Successfully created index on h3_id.")
 }

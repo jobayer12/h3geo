@@ -16,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/joho/godotenv"
 )
 
 type User struct {
@@ -41,12 +42,18 @@ var client *mongo.Client
 var collection *mongo.Collection
 
 func main() {
-	// Connect to MongoDB
-	var err error
+	// Load .env if present
+	_ = godotenv.Load("../.env")
 	mongoURI := os.Getenv("DATABASE_CONNECTION_URI")
 	if mongoURI == "" {
-		log.Fatal("DATABASE_CONNECTION_URI environment variable not set")
+		mongoURI = "mongodb://localhost:27017"
 	}
+	dbName := os.Getenv("MONGO_INITDB_DATABASE")
+	if dbName == "" {
+		dbName = "geo_data"
+	}
+	// Connect to MongoDB
+	var err error
 	client, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		fmt.Println("Error connecting to MongoDB:", err)
@@ -62,15 +69,7 @@ func main() {
 	fmt.Println("Connected to MongoDB!")
 
 	// Get collection
-	collection = client.Database("h3geo").Collection("users")
-
-	// Create index on h3_id for faster queries
-	indexModel := mongo.IndexModel{
-		Keys: bson.M{
-			"h3_id": 1,
-		},
-	}
-	collection.Indexes().CreateOne(context.TODO(), indexModel)
+	collection = client.Database(dbName).Collection("users")
 
 	// Setup routes
 	r := mux.NewRouter()
@@ -90,9 +89,14 @@ func main() {
 	})
 
 	handler := c.Handler(r)
+	// Get port from environment variable (Koyeb requirement)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // fallback for local development
+	}
 
-	fmt.Println("Server starting on :8080")
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	fmt.Printf("Server starting on :%s\n", port)
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
 
 // serveStaticFiles serves the Angular app static files
@@ -134,7 +138,7 @@ func getNearbyUsers(w http.ResponseWriter, r *http.Request) {
 	h3ID, err := h3.LatLngToCell(h3.LatLng{
 		Lat: req.Lat,
 		Lng: req.Long,
-	}, 8) // Changed from 7 to 8
+	}, 8)
 	if err != nil {
 		http.Error(w, "Invalid coordinates", http.StatusBadRequest)
 		return

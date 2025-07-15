@@ -1,48 +1,38 @@
 import { Component, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { HttpClient, HttpClientModule } from '@angular/common/http';
 import * as L from 'leaflet';
-import { environment } from '../environments/environment';
+import { UsersService } from './common/users.service';
+import { User } from './common/interfaces/user.interface';
+import { Subject, takeUntil } from 'rxjs';
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  lat: number;
-  long: number;
-  h3_id: string;
-}
-
-interface NearbyResponse {
-  users: User[];
-  total: number;
-}
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, HttpClientModule],
+  imports: [CommonModule],
+  providers: [UsersService],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
 export class AppComponent implements AfterViewInit {
   private map!: L.Map;
-  private clickMarker?: L.CircleMarker; 
   private clickCircle?: L.Circle;
   private userMarkers: L.Marker[] = [];
   users: User[] = [];
-  loading = false;
+  cancelPreviousRequest = new Subject();
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private readonly userService: UsersService
+  ) {}
 
   ngAfterViewInit(): void {
     this.initMap();
   }
 
   private initMap(): void {
-    this.map = L.map('map').setView([23.685, 90.3563], 7);
+    this.map = L.map('map').setView([23.685, 90.3563], 2);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18,
       attribution: '© OpenStreetMap contributors'
     }).addTo(this.map);
@@ -52,20 +42,8 @@ export class AppComponent implements AfterViewInit {
 
   private onMapClick(e: L.LeafletMouseEvent): void {
     const { lat, lng } = e.latlng;
-
-    // Remove previous click marker and circle
     this.clearPreviousClickElements();
 
-    // Add new click marker
-    // this.clickMarker = L.circleMarker([lat, lng], {
-    //   radius: 8,
-    //   fillColor: 'red',
-    //   color: 'red',
-    //   weight: 2,
-    //   opacity: 1,
-    //   fillOpacity: 0.8
-    // }).addTo(this.map);
-    // Add circle with 5.2km radius
     this.clickCircle = L.circle([lat, lng], {
       color: 'red',
       fillColor: '#f03',
@@ -84,10 +62,6 @@ export class AppComponent implements AfterViewInit {
   }
 
   private clearPreviousClickElements(): void {
-    if (this.clickMarker) {
-      this.map.removeLayer(this.clickMarker);
-      this.clickMarker = undefined;
-    }
     if (this.clickCircle) {
       this.map.removeLayer(this.clickCircle);
       this.clickCircle = undefined;
@@ -102,23 +76,20 @@ export class AppComponent implements AfterViewInit {
   }
 
   private getNearbyUsers(lat: number, lng: number): void {
-    this.loading = true;
+    this.cancelPreviousRequest.next(null);
+    this.cancelPreviousRequest.complete(); 
+    this.cancelPreviousRequest = new Subject(); 
     this.users = [];
     this.clearUserMarkers();
 
-    this.http.post<NearbyResponse>(
-      `${environment.apiBaseUrl}/api/nearby`, 
-      { lat, long: lng }
-    )
+    this.userService.loadNearbyUsers(lat, lng).pipe(takeUntil(this.cancelPreviousRequest))
     .subscribe({
       next: (response) => {
         this.users = response.users;
         this.addUserMarkers(response.users);
-        this.loading = false;
       },
       error: (error) => {
         console.error('Error fetching nearby users:', error);
-        this.loading = false;
       }
     });
   }
